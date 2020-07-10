@@ -1,0 +1,79 @@
+SELECT 
+  O.posCode  as ObjectPosCode,
+  Sell.posCode as SellPosCode,
+  'T' as Type,
+  CAST(Sell.date AS date) as Date,
+  Cust.ekpou as Bulstat,
+  Sell.sumaAll as TotalAmount,
+  Sell.suma as ExVatAmount,
+  Sell.statusId as SellStatusId,
+  Sell.typeId as SellTypeId,
+  VBVG.[1] as VAT1,
+  VBVG.[2] as VAT2,
+  VBVG.[3] as VAT3,
+  VBVG.[4] as VAT4,
+  VBVG.[5] as VAT5,
+  Cust.name as Name,
+  Cust.vatNumber as CustomerVatNo,
+  Cust.posCode as Att_No,
+  C.bon as Cust_No,
+  CBK.serial as Fiscal_Prn_No,
+  C.fiscalBonCounter as Fiscal_Receipt,
+  SellOrg.OrgInvoice,
+  SellOrg.posCode as OrgAttNo,
+  SellOrg.vatNumber as OrgCustNo
+
+
+FROM 
+Selling as Sell
+
+JOIN dbo.DocumentType ON DocumentType.id = Sell.typeId
+               
+outer apply
+(
+  select * from 
+  (
+	--select Article.vatGroupId, sum(sumWithVat - sumNoVat) as vatGroupTotal
+	select Article.vatGroupId, (sumWithVat - sumNoVat) as vatGroupTotal
+
+	from dbo.SellingItems 
+	join dbo.Article on Article.id = SellingItems.articleId
+	where sellingId = Sell.id
+	--group by Article.vatGroupId
+  ) v
+  pivot
+  (
+	sum( v.vatGroupTotal )
+	for v.vatGroupId in ( [1],[2],[3],[4],[5] )
+  ) piv
+) VBVG
+
+LEFT JOIN Customer     as Cust ON Cust.id      = Sell.customerId
+LEFT JOIN Cashbons     as C    ON Sell.posCode = CAST(RIGHT(C.invoice, 10) as bigint )							   
+                              AND DocumentType.posCodeId  = CAST(LEFT(C.invoice, 2 ) as smallint )
+LEFT JOIN CashBonsKey  as CBK  ON CBK.id       = C.cashBonsKeyId 
+							  AND CBK.objectId = Sell.objectId                    
+LEFT JOIN Object       as O    ON O.id         = Sell.objectId 
+
+
+
+outer apply
+(
+  select top 1 RIGHT('0000000000' + CAST(inv.posCode as varchar(10)),10) as OrgInvoice, invCust.posCode, invCust.vatNumber
+  from Selling as inv
+  JOIN DocumentType as DT on DT.id = inv.typeId
+  LEFT JOIN Customer as invCust on invCust.id = inv.customerId
+  where Sell.typeId in (12, 102, 105) 
+	AND Sell.objectId = inv.objectId
+	AND CAST(RIGHT(Sell.relatedInvoiceNumber,10) as bigint ) = inv.posCode
+	AND CAST(LEFT(RIGHT(Sell.relatedInvoiceNumber,12),2) as smallint) = DT.posCodeId
+	
+  
+) SellOrg
+  
+  
+  
+WHERE 
+  Sell.statusId                         < 4 
+  AND DocumentType.flagPrimaryDocument  = 0
+  AND CAST(Sell.date AS date)           = '2019-11-07'
